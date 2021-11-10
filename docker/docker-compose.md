@@ -9,7 +9,9 @@ Using Compose is basically a three-step process:
 2.	Define the services that make up your app in `docker-compose.yml` so they can be run together in an isolated environment.
 3.	Run `docker compose up` and the Docker compose command starts and runs your entire app. You can alternatively run `docker-compose up` using the docker-compose binary.
 
-Sample project to get started, reference: https://docs.docker.com/compose/gettingstarted/
+## Sample project to get started
+
+Reference: https://docs.docker.com/compose/gettingstarted/
 
 1. Create a directory
 ```
@@ -136,3 +138,177 @@ The new volumes key mounts the project directory (current directory) on the host
 ```
 # docker-compose down --volumes
 ```
+
+## Environment variables
+
+It’s possible to use environment variables in your shell to populate values inside a Compose file:
+```
+web:
+  image: "webapp:${TAG}"
+```
+
+Following are the ways in which env variable `TAG` can be defined:
+
+1. File `.env` is in the project directory
+```
+# cat .env
+TAG=v1.5
+```
+
+2. Option `--env-file` followed by absolute path of the file
+```
+# docker-compose --env-file ./config/.env.dev config
+```
+
+Following command can help in making sure what environment variables are being loaded by the compose utility:
+```
+# docker-compose config
+```
+
+If docker containers are to us environment variables, those variables can defined in `docker-compose.yaml` in following ways:
+1. Directly define it in the environment section of the service
+```
+web:
+  environment:
+    - DEBUG=1       
+```
+
+2. Declare the variable to use and define them while running the compose utility `docker-compose run -e DEBUG=1 ...`
+```
+web:
+  environment:
+    - DEBUG
+```
+
+3. Define the variables in a file and pass the file path in `env_file` section of the service
+```
+web:
+  env_file:
+    - web-variables.env
+```
+
+When the same environment variable is set in multiple files, here’s the priority used by Compose to choose which value to use:
+
+1. Compose file
+2. Shell environment variables
+3. Environment file
+4. Dockerfile
+5. Variable is not defined
+
+## Service profiles
+
+Profiles allow adjusting the Compose application mode by selectively enabling services. This is achieved by assigning each service to zero or more profiles. If unassigned, the service is always started but if assigned, it is only started if the profile is activated.
+
+This allows one to define additional services in a single docker-compose.yml file that should only be started in specific scenarios, e.g. for debugging or development tasks.
+
+```
+version: "3.9"
+services:
+  frontend:
+    image: frontend
+    profiles: ["frontend", "dev"]
+
+  phpmyadmin:
+    image: phpmyadmin
+    depends_on:
+      - db
+    profiles:
+      - debug
+      - dev
+
+  backend:
+    image: backend
+
+  db:
+    image: mysql
+```
+
+To run selective profile option `--profile` can be multiple times as follows:
+```
+# docker-compose --profile frontend --profile debug up
+```
+
+Or set environment variable `COMPOSE_PROFILES` to list down all the profiles to be activated:
+```
+# COMPOSE_PROFILES=frontend,debug docker-compose up
+```
+
+## Extending compose file
+
+Compose supports two methods of sharing common configuration:
+
+1. Extending an entire Compose file by using multiple Compose files
+2. Extending individual services with the `extends` field
+
+By default, `docker-compose` will override `docker-compose.override.yml` file as well with `docker-compose.yaml` file. But, if configuration from another file needs to extended, following command can be used:
+```
+# docker-compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+```
+
+Or, `extend` keyword can be used in compose file to pull additional attributes from another copose file:
+```
+# docker-compose.yaml
+services:
+  web:
+    extends:
+      file: common-services.yaml
+      service: webapp
+```
+```
+# common-services.yaml
+services:
+  webapp:
+    build: .
+    ports:
+      - "8000:8000"
+    volumes:
+      - "/data"
+```
+
+## Networking in compose
+
+By default Compose sets up a single network for your app. Each container for a service joins the default network and is both reachable by other containers on that network, and discoverable by them at a hostname identical to the container name.
+
+Before compose starts building the containers, it creates an overlay network called `<project-name>_default` and post creation of the containers, they join that network.
+
+Links can be defined as extra aliases by which a service is reachable from another service.
+```
+  web:
+    build: .
+    links:
+      - "db:database"
+  db:
+    image: postgres
+```
+Here, `web` can contact `db` with 2 names: `db` and `database`.
+
+Specific custom networks can be also defined to isolate services or to deploy comples toplogies:
+```
+version: "3.9"
+
+services:
+  proxy:
+    build: ./proxy
+    networks:
+      - frontend
+  app:
+    build: ./app
+    networks:
+      - frontend
+      - backend
+  db:
+    image: postgres
+    networks:
+      - backend
+
+networks:
+  frontend:
+    driver: custom-driver-1
+  backend:
+    driver: custom-driver-2
+    driver_opts:
+    foo: "1"
+    bar: "2"
+```
+
+Default network can also be configured by defining `default` key in `networks` section.
